@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UserNotifications
 
 struct ValueBar: View {
 
@@ -15,12 +16,16 @@ struct ValueBar: View {
     let currentValue: Double
     let minValue: Double
     let maxValue: Double
+    let isFlipped: Bool
 
     // MARK: - Threshold (per bar)
     @AppStorage private var threshold: Double
 
     @State private var showThresholdPrompt = false
     @State private var thresholdInput = ""
+
+    // MARK: - Threshold crossing tracking
+    @State private var wasExceeding = false
 
     var height: CGFloat = 250
     var width: CGFloat = 60
@@ -30,15 +35,17 @@ struct ValueBar: View {
         unit: String,
         currentValue: Double,
         minValue: Double,
-        maxValue: Double
+        maxValue: Double,
+        isFlipped: Bool
     ) {
         self.label = label
         self.unit = unit
         self.currentValue = currentValue
         self.minValue = minValue
         self.maxValue = maxValue
+        self.isFlipped = isFlipped
 
-        // individual key per bar
+        // Individual threshold per bar
         _threshold = AppStorage(wrappedValue: 50, "threshold_\(label)")
     }
 
@@ -52,9 +59,37 @@ struct ValueBar: View {
     }
 
     private var barColor: Color {
-        currentValue > threshold ? .red : .blue
+        if isFlipped {
+            currentValue >= threshold ? .blue : .red
+        } else {
+            currentValue > threshold ? .red : .blue
+        }
     }
 
+    // MARK: - Threshold logic
+    private var exceedsThreshold: Bool {
+        isFlipped
+            ? currentValue < threshold
+            : currentValue > threshold
+    }
+
+    // MARK: - Notification
+    private func sendWarningNotification() {
+        let content = UNMutableNotificationContent()
+        content.title = "⚠️ Warning"
+        content.body = "\(label) exceeded threshold"
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: UUID().uuidString, // IMPORTANT
+            content: content,
+            trigger: nil
+        )
+
+        UNUserNotificationCenter.current().add(request)
+    }
+
+    // MARK: - View
     var body: some View {
         VStack(spacing: 12) {
 
@@ -105,6 +140,17 @@ struct ValueBar: View {
             }
 
             Button("Cancel", role: .cancel) { }
+
+        }
+        // MARK: - Threshold crossing detection (FIX)
+        .onChange(of: exceedsThreshold) { _, nowExceeding in
+            if nowExceeding && !wasExceeding {
+//                sendWarningNotification()
+                if UIApplication.shared.applicationState != .active {
+                    sendWarningNotification()
+                }
+            }
+            wasExceeding = nowExceeding
         }
     }
 }

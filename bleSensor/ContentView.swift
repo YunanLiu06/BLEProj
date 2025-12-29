@@ -10,12 +10,14 @@ import SwiftUI
 struct ContentView: View {
     
     @StateObject private var ble = BLEManager()
-    
-    var pressureValues: [Double] {
-        ble.receivedText
-            .split(separator: ",")          // Split the string by commas
-            .compactMap { Double($0.trimmingCharacters(in: .whitespaces)) } // Convert each part to Double
-    }
+
+    // MARK: - EMA Filters
+    @State private var pressureEMA = EMAFilter(alpha: 0.18)
+    @State private var temperatureEMA = EMAFilter(alpha: 0.1)
+
+    @State private var filteredPressure: Double = 0
+    @State private var filteredTemperature: Double = 0
+
     // MARK: - Recording State
     @State private var isRecording = false
     @State private var startTime: Date?
@@ -57,29 +59,31 @@ struct ContentView: View {
                     .foregroundColor(.white)
             }
             
-            
             Spacer()
             
             HStack(spacing: 16) {
                 ValueBar(
                     label: "Pressure",
                     unit: "psi",
-                    currentValue: pressureValues.count > 1 ? pressureValues[1] : 0.0,
+                    currentValue: filteredPressure,
                     minValue: 0,
-                    maxValue: 120
+                    maxValue: 120,
+                    isFlipped: true
                 )
                 
                 ValueBar(
                     label: "Temperature",
                     unit: "F",
-                    currentValue: pressureValues.count > 0 ? pressureValues[0] : 0.0,
+                    currentValue: filteredTemperature,
                     minValue: 0,
-                    maxValue: 300
+                    maxValue: 300,
+                    isFlipped: false
                 )
             }
             
             Spacer()
             
+            // MARK: - Recording Controls
             VStack {
                 Button(action: isRecording ? stopRecording : startRecording) {
                     Text(isRecording ? "Stop Recording" : "Start Recording")
@@ -106,6 +110,29 @@ struct ContentView: View {
             }
             .padding()
         }
+
+        // MARK: EMA filter
+        .onChange(of: ble.receivedText) { _, newText in
+            let values = newText
+                .split(separator: ",")
+                .compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+
+            if values.count > 1 {
+                filteredPressure = pressureEMA.filter(values[1])
+            }
+
+            if values.count > 0 {
+                filteredTemperature = temperatureEMA.filter(values[0])
+            }
+        }
+
+        // MARK: Reset EMA on reconnect
+        .onChange(of: ble.step) { _, step in
+            if step == .subscribed {
+                pressureEMA.reset()
+                temperatureEMA.reset()
+            }
+        }
     }
     
     private var statusColor: Color {
@@ -119,7 +146,6 @@ struct ContentView: View {
     // MARK: - Recording Logic
     
     private func startRecording() {
-        print("Recording started")
         samples.removeAll()
         startTime = Date()
         isRecording = true
@@ -134,8 +160,8 @@ struct ContentView: View {
             let sample = PressureSample(
                 elapsedTime: elapsed,
                 utcTimestamp: utcTimestamp,
-                pressure: pressureValues.count > 1 ? pressureValues[1] : 0.0,
-                temperature: pressureValues.count > 0 ? pressureValues[0] : 0.0
+                pressure: filteredPressure,
+                temperature: filteredTemperature
             )
             
             samples.append(sample)
@@ -143,7 +169,6 @@ struct ContentView: View {
     }
     
     private func stopRecording() {
-        print("Recording stopped")
         isRecording = false
         timer?.invalidate()
         timer = nil
@@ -157,4 +182,6 @@ struct ContentView: View {
     }
 }
 
-#Preview { ContentView() }
+#Preview {
+    ContentView()
+}
